@@ -113,8 +113,24 @@ svg.omok .lastm{fill:none;stroke:#e04a2a;stroke-width:2}
 svg.omok .lastm.onb{stroke:#ff8a6a}
 svg.omok.mine .hit{cursor:pointer}
 /* Chess */
-.chess{display:grid;grid-template-columns:repeat(8,1fr);aspect-ratio:1;max-width:100%;border:6px solid var(--wood-edge);border-radius:6px;box-shadow:var(--shadow);user-select:none;touch-action:manipulation}
-.sq{position:relative;display:grid;place-items:center;font-family:"Noto Sans Symbols 2","Segoe UI Symbol","DejaVu Sans",sans-serif;font-size:clamp(22px,6.2vmin,46px);line-height:1}
+.chess{display:grid;grid-template-columns:repeat(8,1fr);grid-template-rows:repeat(8,1fr);aspect-ratio:1;width:100%;max-width:100%;border:6px solid var(--wood-edge);border-radius:6px;box-shadow:var(--shadow);user-select:none;touch-action:manipulation;container-type:inline-size}
+.sq{position:relative;display:grid;place-items:center;min-width:0;min-height:0;overflow:hidden;font-family:"Noto Sans Symbols 2","Segoe UI Symbol","DejaVu Sans",sans-serif;font-size:clamp(22px,6.2vmin,46px);font-size:9cqw;line-height:1}
+.sq .p{display:block;height:1em;line-height:1}
+/* chat */
+.chat{display:flex;flex-direction:column;gap:8px;background:var(--surface2);border-radius:10px;padding:10px 12px}
+.chat h3{margin:0;font-size:12px;color:var(--muted);letter-spacing:.06em;font-weight:500}
+.chat .log{max-height:180px;overflow:auto;display:flex;flex-direction:column;gap:4px;font-size:14px}
+.chat .msg{display:flex;gap:6px;align-items:baseline}
+.chat .msg b{font-weight:700;flex:none;max-width:6em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.chat .msg.me b{color:var(--accent)}
+.chat .msg span{overflow-wrap:anywhere}
+.chat .empty{color:var(--muted);font-size:13px}
+.chat .quick{display:flex;flex-wrap:wrap;gap:6px}
+.chat .quick button{border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:4px 10px;font-size:13px;cursor:pointer}
+.chat .quick button:hover{border-color:var(--accent)}
+.chat form{display:flex;gap:6px}
+.chat form input{flex:1;min-width:0;padding:7px 10px;font-size:14px}
+.chat form button{flex:none}
 .sq.l{background:var(--sq-light)} .sq.d{background:var(--sq-dark)}
 .sq.last::before{content:"";position:absolute;inset:0;background:var(--sq-last)}
 .sq.sel::before{content:"";position:absolute;inset:0;background:var(--sq-sel)}
@@ -248,7 +264,7 @@ function sanOf(st,m,n,legal){const p=st.board[m.from],t=p.toUpperCase();let s=''
     else{const others=legal.filter(x=>x.to===m.to&&x.from!==m.from&&st.board[x.from]===p);let dis='';if(others.length){const sameFile=others.some(x=>(x.from&7)===(m.from&7)),sameRank=others.some(x=>(x.from>>3)===(m.from>>3));dis=!sameFile?FILES[m.from&7]:!sameRank?String(8-(m.from>>3)):sqName(m.from);}
       s=t+dis+(cap?'x':'')+sqName(m.to);}}
   if(isAttacked(n.board,kingSq(n.board,n.turn),st.turn))s+='+';return s;}
-const GLYPH={K:'♚',Q:'♛',R:'♜',B:'♝',N:'♞',P:'♟'};
+const GLYPH={K:'♚︎',Q:'♛︎',R:'♜︎',B:'♝︎',N:'♞︎',P:'♟︎'};
 
 
 /* ============================================================
@@ -258,7 +274,21 @@ const CODE_CHARS='ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 const genCode=()=>Array.from({length:5},()=>CODE_CHARS[Math.floor(Math.random()*CODE_CHARS.length)]).join('');
 const now=()=>Date.now();
 const PEER_PREFIX='maetsu-v1-';
-function newRoomDoc(code,game,creatorPid,creatorName){return{code,game,createdAt:now(),updatedAt:now(),creator:creatorPid,seats:{first:creatorPid,second:null},names:{[creatorPid]:creatorName},moves:[],status:'waiting',result:null,drawOffer:null,rematch:{},round:1};}
+function newRoomDoc(code,game,creatorPid,creatorName){return{code,game,createdAt:now(),updatedAt:now(),creator:creatorPid,seats:{first:creatorPid,second:null},names:{[creatorPid]:creatorName},moves:[],status:'waiting',result:null,drawOffer:null,rematch:{},round:1,chat:[]};}
+/* ICE: STUN 기본. 중계(TURN) 서버가 생기면 TURN_SERVERS에 {urls,username,credential}를 추가 */
+const TURN_SERVERS=[];
+const ICE_CONFIG={iceServers:[{urls:['stun:stun.l.google.com:19302','stun:stun1.l.google.com:19302','stun:stun.cloudflare.com:3478']}].concat(TURN_SERVERS)};
+const PEER_OPTS={debug:1,config:ICE_CONFIG};
+let connKind=null; // 'direct' | 'relay' | null — 실제 경로 진단용
+async function probeConn(c){try{const pc=c.peerConnection;if(!pc)return;const stats=await pc.getStats();let pair=null;stats.forEach(r=>{if(r.type==='candidate-pair'&&(r.state==='succeeded'||r.nominated)&&(!pair||r.bytesSent>pair.bytesSent))pair=r;});if(!pair)return;let kind='direct';stats.forEach(r=>{if(r.type==='local-candidate'&&r.id===pair.localCandidateId&&r.candidateType==='relay')kind='relay';if(r.type==='remote-candidate'&&r.id===pair.remoteCandidateId&&r.candidateType==='relay')kind='relay';});connKind=kind;render();}catch(e){}}
+const QUICK_CHAT=['⏰ 빨리 두세요','🤔 생각 중…','👏 좋은 수!','😱 아이고','🙏 한 수만 물러주세요','☕ 잠시만요','😂','🔥','🤝 한 판 더?'];
+function pushChat(from,name,text){const t=String(text||'').trim().slice(0,120);if(!t)return;const chat=(S.chat||[]).concat([{pid:from,name:String(name||'').slice(0,16),text:t,at:now()}]).slice(-40);applyPatch({chat});}
+function sendChat(text){if(!S||mode!=='online')return;const t=String(text||'').trim();if(!t)return;
+  if(role==='host'){pushChat(pid,myName||'플레이어 1',t);persistHost();broadcastState();render();}
+  else if(hostConn&&connected)hostConn.send({t:'chat',text:t.slice(0,120)});else toast('연결이 끊겨 있어 보낼 수 없습니다.');}
+let lastChatSeen=0;
+function notifyChat(){if(!S||!S.chat||!S.chat.length)return;const m=S.chat[S.chat.length-1];if(m.at>lastChatSeen){if(m.pid!==pid)toast((m.name||'상대')+': '+m.text);lastChatSeen=m.at;}}
+function markChatSeen(){lastChatSeen=(S&&S.chat&&S.chat.length)?S.chat[S.chat.length-1].at:now();}
 const mySeat=()=>!S?null:S.seats.first===pid?'first':S.seats.second===pid?'second':null;
 const turnSeat=()=>S.moves.length%2===0?'first':'second';
 const seatLabel=(seat,game)=>game==='omok'?(seat==='first'?'흑':'백'):(seat==='first'?'백':'흑');
@@ -284,7 +314,7 @@ function write(patch){
 function hostOnline(){const s=new Set([pid]);for(const c of conns.values())if(c.pid)s.add(c.pid);return s;}
 function broadcastState(){onlinePids=hostOnline();const msg={t:'state',S,online:[...onlinePids]};for(const c of conns.values()){try{if(c.conn.open)c.conn.send(msg);}catch(e){}}}
 function openHostPeer(code){if(peer){try{peer.destroy();}catch(e){}}
-  peer=new Peer(PEER_PREFIX+code,{debug:1});
+  peer=new Peer(PEER_PREFIX+code,PEER_OPTS);
   peer.on('open',()=>{hostRetry=0;onlinePids=hostOnline();toast('방이 열렸습니다. 코드 '+code+'를 상대에게 알려 주세요.');render();});
   peer.on('connection',c=>setupHostConn(c));
   peer.on('disconnected',()=>{if(role==='host'&&peer&&!peer.destroyed){try{peer.reconnect();}catch(e){}}});
@@ -293,7 +323,7 @@ function openHostPeer(code){if(peer){try{peer.destroy();}catch(e){}}
     else if(e.type==='network'||e.type==='server-error'||e.type==='socket-error'){toast('연결 서버에 닿지 않습니다. 인터넷 상태를 확인해 주세요.');}
     else if(e.type!=='peer-unavailable')toast('연결 오류: '+e.type);});}
 function setupHostConn(c){
-  c.on('open',()=>{conns.set(c.peer,{conn:c,pid:null,name:''});});
+  c.on('open',()=>{conns.set(c.peer,{conn:c,pid:null,name:''});setTimeout(()=>probeConn(c),1500);});
   c.on('data',msg=>handleHostMsg(c,msg));
   const drop=()=>{conns.delete(c.peer);broadcastState();render();};
   c.on('close',drop);c.on('error',drop);}
@@ -303,16 +333,21 @@ function handleHostMsg(c,msg){if(!msg||typeof msg!=='object'||!S)return;const re
     if(S.seats.first!==p&&S.seats.second!==p&&!S.seats.second){patch.seats={first:S.seats.first,second:p};if(S.status==='waiting')patch.status='playing';}
     applyPatch(patch);persistHost();broadcastState();render();return;}
   if(msg.t==='patch'&&msg.patch&&typeof msg.patch==='object'){const seat=rec.pid&&(S.seats.first===rec.pid?'first':S.seats.second===rec.pid?'second':null);if(!seat)return;/* 관전자는 쓰기 불가 */
-    const patch=Object.assign({},msg.patch);delete patch.code;delete patch.game;delete patch.creator;applyPatch(patch);persistHost();broadcastState();render();return;}}
+    const patch=Object.assign({},msg.patch);delete patch.code;delete patch.game;delete patch.creator;delete patch.chat;applyPatch(patch);persistHost();broadcastState();render();return;}
+  if(msg.t==='chat'&&rec.pid){pushChat(rec.pid,(S.names&&S.names[rec.pid])||rec.name,msg.text);persistHost();broadcastState();notifyChat();render();return;}}
 
 /* ---- client ---- */
 function openClientPeer(code,attempt){connecting={code,attempt:attempt||1};render();
   if(peer){try{peer.destroy();}catch(e){}}
-  peer=new Peer({debug:1});
+  peer=new Peer(PEER_OPTS);connKind=null;
   peer.on('open',()=>{const c=peer.connect(PEER_PREFIX+code,{reliable:true});hostConn=c;
-    c.on('open',()=>{connected=true;connecting=null;LS.set('maetsu.client',code);LS.set('maetsu.clientAt',String(now()));c.send({t:'hello',pid,name:myName||'플레이어 2'});render();});
-    c.on('data',msg=>{if(!msg||msg.t!=='state'||!msg.S)return;const prev=S;S=msg.S;onlinePids=new Set(Array.isArray(msg.online)?msg.online:[]);onlinePids.add(pid);
-      if(!prev||prev.moves.length!==S.moves.length||prev.status!==S.status||prev.round!==S.round){ui.sel=null;ui.legal=[];ui.promo=null;}render();});
+    // ICE 진단: 20초 안에 데이터 채널이 안 열리면 P2P 차단으로 판단
+    const t0=now();const iceT=setInterval(()=>{if(role!=='client'||hostConn!==c){clearInterval(iceT);return;}const pc=c.peerConnection;const st=pc?pc.iceConnectionState:null;
+      if(connected){clearInterval(iceT);return;}
+      if(st==='failed'||(now()-t0>20000&&!connected)){clearInterval(iceT);connecting=Object.assign({},connecting,{blocked:true,ice:st});render();}},1000);
+    c.on('open',()=>{connected=true;connecting=null;LS.set('maetsu.client',code);LS.set('maetsu.clientAt',String(now()));c.send({t:'hello',pid,name:myName||'플레이어 2'});render();setTimeout(()=>probeConn(c),1500);});
+    c.on('data',msg=>{if(!msg||msg.t!=='state'||!msg.S)return;const prev=S;S=msg.S;onlinePids=new Set(Array.isArray(msg.online)?msg.online:[]);onlinePids.add(pid);if(!prev)markChatSeen();
+      if(!prev||prev.moves.length!==S.moves.length||prev.status!==S.status||prev.round!==S.round){ui.sel=null;ui.legal=[];ui.promo=null;}notifyChat();render();});
     const lost=()=>{if(role!=='client')return;connected=false;onlinePids=new Set([pid]);render();scheduleReconnect(code);};
     c.on('close',lost);c.on('error',lost);});
   peer.on('error',e=>{console.warn('peer error',e.type,e);if(role!=='client')return;
@@ -323,7 +358,7 @@ function scheduleReconnect(code){clearTimeout(reconnectT);reconnectT=setTimeout(
 
 /* ---- lobby actions ---- */
 function createRoom(game){if(!hasPeer()){toast('연결 라이브러리를 불러오지 못했습니다. 인터넷 연결 후 새로고침해 주세요.');return;}saveName();
-  const code=genCode();S=newRoomDoc(code,game,pid,myName||'플레이어 1');role='host';mode='online';hostRetry=0;persistHost();LS.del('maetsu.client');openHostPeer(code);render();}
+  const code=genCode();S=newRoomDoc(code,game,pid,myName||'플레이어 1');role='host';mode='online';hostRetry=0;markChatSeen();persistHost();LS.del('maetsu.client');openHostPeer(code);render();}
 function joinRoom(codeRaw){if(!hasPeer()){toast('연결 라이브러리를 불러오지 못했습니다. 인터넷 연결 후 새로고침해 주세요.');return;}const code=(codeRaw||'').trim().toUpperCase();if(code.length<4){toast('방 코드를 입력해 주세요.');return;}saveName();
   role='client';mode='online';S=null;connected=false;LS.del('maetsu.host');openClientPeer(code,1);}
 function startLocal(game){saveName();mode='local';role='local';S=newRoomDoc('LOCAL',game,pid,myName||'플레이어 1');S.seats.second='local2';S.names.local2='플레이어 2';S.status='playing';ui.sel=null;ui.legal=[];render();}
@@ -349,10 +384,12 @@ function refreshOnline(){if(role==='host')onlinePids=hostOnline();else if(mode==
    RENDER
    ============================================================ */
 function render(){renderHeader();const m=$('#main');m.replaceChildren();if(!S)m.append(connecting?renderConnecting():renderLobby());else m.append(renderRoom());}
-function renderConnecting(){return el('div',{class:'lobby'},el('div',{class:'card wide',style:'text-align:center'},el('h2',{text:'방 '+connecting.code+'에 연결 중…'}),el('p',{class:'desc',text:'방장이 페이지를 열어 두고 있어야 연결됩니다.'+(connecting.attempt>1?' (재시도 '+connecting.attempt+'회)':'')}),el('button',{class:'btn',type:'button',onclick:leaveRoom},'취소')));}
+function renderConnecting(){return el('div',{class:'lobby'},el('div',{class:'card wide',style:'text-align:center'},el('h2',{text:'방 '+connecting.code+'에 연결 중…'}),el('p',{class:'desc',text:'방장이 페이지를 열어 두고 있어야 연결됩니다.'+(connecting.attempt>1?' (재시도 '+connecting.attempt+'회)':'')}),
+  connecting.blocked?el('div',{class:'notice err',style:'text-align:left;margin-bottom:14px'},'방은 찾았지만 기기 간 직접 연결(P2P)이 열리지 않습니다. 휴대폰 데이터(LTE·5G)나 회사망처럼 P2P를 막는 네트워크에서 생기는 현상입니다. 두 기기를 모두 와이파이에 연결하거나, 휴대폰 핫스팟을 켜서 노트북을 그 핫스팟에 물리면 대부분 해결됩니다. (ICE 상태: '+(connecting.ice||'unknown')+')'):null,
+  el('button',{class:'btn',type:'button',onclick:leaveRoom},'취소')));}
 
 function renderHeader(){const h=$('#hdrRight');h.replaceChildren();if(!S)return;
-  if(mode==='online'){const chip=el('button',{class:'code-chip',type:'button',title:'코드 복사',onclick:copyCode},el('span',{class:'lbl',text:'방 코드'}),el('span',{class:'code',text:S.code}));h.append(chip);const pill=el('span',{class:'pill'+((role==='host'?onlinePids.size>1:connected)?' on':'')},el('span',{class:'dot'}),role==='host'?(onlinePids.size>1?'상대 접속 중':'상대 대기 중'):(connected?'연결됨':'재연결 중…'));h.append(pill);}
+  if(mode==='online'){const chip=el('button',{class:'code-chip',type:'button',title:'코드 복사',onclick:copyCode},el('span',{class:'lbl',text:'방 코드'}),el('span',{class:'code',text:S.code}));h.append(chip);const pill=el('span',{class:'pill'+((role==='host'?onlinePids.size>1:connected)?' on':'')},el('span',{class:'dot'}),role==='host'?(onlinePids.size>1?'상대 접속 중':'상대 대기 중'):(connected?'연결됨':'재연결 중…'),connKind&&(role==='host'?onlinePids.size>1:connected)?' · '+(connKind==='relay'?'중계':'직접'):'');h.append(pill);}
   else h.append(el('span',{class:'pill',text:'같은 컴퓨터 대국'}));
   h.append(el('button',{class:'btn sm',type:'button',onclick:()=>{if(S.status==='playing'&&mode==='online'&&mySeat()){if(!confirm('대국 중입니다. 나가면 상대가 기다리게 됩니다. 나갈까요? (방 코드로 다시 들어올 수 있습니다)'))return;}leaveRoom();}},'나가기'));}
 function copyCode(){const t=S.code;const done=()=>toast('코드 '+t+' 복사됨. 상대에게 알려 주세요.');if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(t).then(done,()=>toast('코드: '+t));else toast('코드: '+t);}
@@ -379,6 +416,16 @@ function renderRoom(){refreshOnline();const a=analyze();const room=el('div',{cla
   if(S.game==='omok')boardBox.append(renderOmok(a));else{boardBox.append(renderChess(a));if(ui.promo)boardBox.append(renderPromo());}
   room.append(el('div',{class:'board-wrap'},boardBox));
   room.append(renderSide(a));return room;}
+
+function renderChat(){const box=el('div',{class:'chat'});box.append(el('h3',{text:'채팅'}));
+  const log=el('div',{class:'log'});const chat=S.chat||[];
+  if(!chat.length)log.append(el('div',{class:'empty',text:'아직 메시지가 없습니다. 아래 버튼으로 빠르게 보낼 수 있습니다.'}));
+  for(const m of chat)log.append(el('div',{class:'msg'+(m.pid===pid?' me':'')},el('b',{text:(m.pid===pid?'나':(m.name||'상대'))}),el('span',{text:m.text})));
+  box.append(log);
+  const quick=el('div',{class:'quick'});for(const q of QUICK_CHAT)quick.append(el('button',{type:'button',onclick:()=>sendChat(q)},q));box.append(quick);
+  const inp=el('input',{type:'text',id:'chatIn',maxlength:'120',placeholder:'메시지 입력 후 Enter',autocomplete:'off'});
+  const form=el('form',{onsubmit:e=>{e.preventDefault();const t=inp.value;inp.value='';sendChat(t);}},inp,el('button',{class:'btn sm',type:'submit'},'보내기'));box.append(form);
+  requestAnimationFrame(()=>{log.scrollTop=log.scrollHeight;});return box;}
 
 function renderSide(a){const side=el('div',{class:'side'});
   const seat=mySeat(),ts=turnSeat();
@@ -411,6 +458,7 @@ function renderSide(a){const side=el('div',{class:'side'});
   if(c.children.length)side.append(c);
   // moves
   side.append(renderMoves(a));
+  if(mode==='online')side.append(renderChat());
   if(S.game==='omok')side.append(el('div',{class:'legend'},el('b',{text:'렌주룰. '}),'흑 차례에 ✕ 표시된 곳은 금수입니다.'));
   return side;}
 
@@ -468,7 +516,7 @@ function renderPromo(){const w=el('div',{class:'promo'},el('span',{style:'font-s
 window.__maetsuEngine={chessInit,legalMoves,makeMove,chessReplay,omokBoard,isForbidden,forbiddenSet,omokAnalyze};
 render();
 (function restore(){const h=LS.get('maetsu.host');
-  if(h){try{const d=JSON.parse(h);if(d&&d.code&&now()-(d.updatedAt||0)<24*3600*1000&&hasPeer()){S=d;role='host';mode='online';openHostPeer(d.code);render();return;}}catch(e){}LS.del('maetsu.host');}
+  if(h){try{const d=JSON.parse(h);if(d&&d.code&&now()-(d.updatedAt||0)<24*3600*1000&&hasPeer()){S=d;role='host';mode='online';markChatSeen();openHostPeer(d.code);render();return;}}catch(e){}LS.del('maetsu.host');}
   const c=LS.get('maetsu.client'),cAt=Number(LS.get('maetsu.clientAt','0'));
   if(c&&now()-cAt<12*3600*1000&&hasPeer()){myName=LS.get('maetsu.name','');role='client';mode='online';openClientPeer(c,1);}})();
 window.addEventListener('beforeunload',()=>{if(peer){try{peer.destroy();}catch(e){}}});
