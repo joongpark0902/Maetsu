@@ -92,7 +92,15 @@ label.f{display:block;font-size:12px;color:var(--muted);letter-spacing:.06em;mar
 .pl .nm{font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .pl .nm small{display:block;font-weight:400;color:var(--muted);font-size:12px}
 .pl .me{font-size:11px;color:var(--accent);letter-spacing:.06em}
-.status{font-family:"Noto Serif KR",serif;font-size:19px;font-weight:600;padding:12px 14px;border-radius:10px;background:var(--surface2);text-wrap:balance}
+.status{font-family:"Noto Serif KR",serif;font-size:19px;font-weight:600;padding:12px 14px;border-radius:10px;background:var(--surface2);text-wrap:balance;position:relative}
+.status .clock{position:absolute;right:12px;top:10px;font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:22px;font-weight:600;font-variant-numeric:tabular-nums;color:var(--accent)}
+.status .clock.low{color:var(--danger);animation:blink 1s steps(2) infinite}
+@keyframes blink{50%{opacity:.45}}
+.mode-pick{display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap}
+.mode-pick button{flex:1 1 160px;border:1px solid var(--line);background:var(--surface2);border-radius:10px;padding:10px 12px;text-align:left;cursor:pointer}
+.mode-pick button b{display:block}
+.mode-pick button small{color:var(--muted)}
+.mode-pick button[aria-pressed=true]{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}
 .status.end{background:var(--accent);color:var(--accent-ink)}
 .status small{display:block;font-family:"Noto Sans KR",sans-serif;font-weight:400;font-size:13px;opacity:.8;margin-top:2px}
 .ctrls{display:flex;gap:8px;flex-wrap:wrap}
@@ -204,6 +212,8 @@ let myName=LS.get('maetsu.name','');
 let mode=null;          // 'online' | 'local'
 let S=null;             // room state (host holds the authoritative copy)
 let lobbyGame=LS.get('maetsu.game','omok');
+let lobbyTimer=Number(LS.get('maetsu.timer','0'))||0; // 0 = 시간 제한 없음, 60 = 빠른 대국(한 수 60초)
+let clockOffset=0; // client: 내 시계 - 방장 시계
 let onlinePids=new Set();
 const ui={sel:null,legal:[],promo:null};
 
@@ -214,7 +224,7 @@ const ui={sel:null,legal:[],promo:null};
 const N=15,DIRS=[[1,0],[0,1],[1,1],[1,-1]];
 const inB=(x,y)=>x>=0&&x<N&&y>=0&&y<N;
 const at=(b,x,y)=>inB(x,y)?b[y*N+x]:-1;
-function omokBoard(moves){const b=new Int8Array(N*N);moves.forEach((m,i)=>{b[m[1]*N+m[0]]=(i%2===0)?1:2;});return b;}
+function omokBoard(moves){const b=new Int8Array(N*N);moves.forEach((m,i)=>{if(m)b[m[1]*N+m[0]]=(i%2===0)?1:2;});return b;}
 function run(b,x,y,dx,dy,c){let lo=0,hi=0;while(at(b,x+dx*(lo-1),y+dy*(lo-1))===c)lo--;while(at(b,x+dx*(hi+1),y+dy*(hi+1))===c)hi++;return{lo,hi,len:hi-lo+1};}
 function omokWin(b,x,y,c){for(const[dx,dy]of DIRS){const n=run(b,x,y,dx,dy,c).len;if(c===1?n===5:n>=5)return true;}return false;}
 function overline(b,x,y){for(const[dx,dy]of DIRS){if(run(b,x,y,dx,dy,1).len>=6)return true;}return false;}
@@ -227,8 +237,8 @@ function openThreeDir(b,x,y,dx,dy,depth){if(fourPts(b,x,y,dx,dy).length)return f
 function forbiddenPlaced(b,x,y,depth){if(omokWin(b,x,y,1))return false;if(overline(b,x,y))return true;let fours=0,threes=0;for(const[dx,dy]of DIRS){fours+=foursInDir(b,x,y,dx,dy);}if(fours>=2)return true;if(depth>3)return false;for(const[dx,dy]of DIRS){if(openThreeDir(b,x,y,dx,dy,depth))threes++;if(threes>=2)return true;}return false;}
 function isForbidden(b,x,y){if(b[y*N+x]!==0)return false;b[y*N+x]=1;const f=forbiddenPlaced(b,x,y,0);b[y*N+x]=0;return f;}
 function forbiddenSet(b){const s=[];for(let y=0;y<N;y++)for(let x=0;x<N;x++){if(b[y*N+x]===0&&isForbidden(b,x,y))s.push(y*N+x);}return s;}
-const omokCoord=m=>'ABCDEFGHIJKLMNO'[m[0]]+(N-m[1]);
-function omokAnalyze(moves){const b=omokBoard(moves);let end=null;if(moves.length){const m=moves[moves.length-1],c=(moves.length-1)%2===0?1:2;if(omokWin(b,m[0],m[1],c))end={type:'win',winner:c===1?'first':'second',reason:'five'};}
+const omokCoord=m=>m?'ABCDEFGHIJKLMNO'[m[0]]+(N-m[1]):'쉼';
+function omokAnalyze(moves){const b=omokBoard(moves);let end=null;if(moves.length&&moves[moves.length-1]){const m=moves[moves.length-1],c=(moves.length-1)%2===0?1:2;if(omokWin(b,m[0],m[1],c))end={type:'win',winner:c===1?'first':'second',reason:'five'};}
   if(!end&&moves.length>=N*N)end={type:'draw',reason:'full'};return{b,end,turn:moves.length%2===0?1:2};}
 
 /* ============================================================
@@ -276,7 +286,8 @@ const posKey=st=>st.board.map(p=>p||'.').join('')+st.turn+(st.castle.K?'K':'')+(
 function insufficient(bd){const ps=bd.filter(Boolean);if(ps.some(p=>'QRPqrp'.includes(p)))return false;const minors=ps.filter(p=>'BNbn'.includes(p));if(minors.length<=1)return true;
   const bishops=[];bd.forEach((p,i)=>{if(p&&'Bb'.includes(p))bishops.push([p,i]);});if(bishops.length===minors.length){const cols=new Set(bishops.map(([p,i])=>((i>>3)+(i&7))&1));if(cols.size===1)return true;}return false;}
 function chessReplay(moves){let st=chessInit();const keys={};keys[posKey(st)]=1;const san=[];let rep=false;
-  for(const m of moves){const legal=legalMoves(st);const mv=legal.find(x=>x.from===m.from&&x.to===m.to&&(x.promo||null)===(m.promo||null));if(!mv)break;const n=makeMove(st,mv);san.push(sanOf(st,mv,n,legal));st=n;const k=posKey(st);keys[k]=(keys[k]||0)+1;if(keys[k]>=3)rep=true;}
+  for(const m of moves){if(m&&m.pass){st=Object.assign({},st,{turn:st.turn==='w'?'b':'w',ep:null,last:null,half:st.half+1});san.push('쉼');const pk=posKey(st);keys[pk]=(keys[pk]||0)+1;if(keys[pk]>=3)rep=true;continue;}
+    const legal=legalMoves(st);const mv=legal.find(x=>x.from===m.from&&x.to===m.to&&(x.promo||null)===(m.promo||null));if(!mv)break;const n=makeMove(st,mv);san.push(sanOf(st,mv,n,legal));st=n;const k=posKey(st);keys[k]=(keys[k]||0)+1;if(keys[k]>=3)rep=true;}
   const legal=legalMoves(st),inCheck=isAttacked(st.board,kingSq(st.board,st.turn),st.turn==='w'?'b':'w');let end=null;
   if(!legal.length)end=inCheck?{type:'win',winner:st.turn==='w'?'second':'first',reason:'checkmate'}:{type:'draw',reason:'stalemate'};
   else if(rep)end={type:'draw',reason:'repetition'};else if(st.half>=100)end={type:'draw',reason:'fifty'};else if(insufficient(st.board))end={type:'draw',reason:'material'};
@@ -361,7 +372,7 @@ const CODE_CHARS='ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 const genCode=()=>Array.from({length:5},()=>CODE_CHARS[Math.floor(Math.random()*CODE_CHARS.length)]).join('');
 const now=()=>Date.now();
 const PEER_PREFIX='maetsu-v1-';
-function newRoomDoc(code,game,creatorPid,creatorName){return{code,game,createdAt:now(),updatedAt:now(),creator:creatorPid,seats:{first:creatorPid,second:null},names:{[creatorPid]:creatorName},moves:[],status:'waiting',result:null,drawOffer:null,rematch:{},round:1,chat:[],setup:{first:'마상상마',second:'마상상마'}};}
+function newRoomDoc(code,game,creatorPid,creatorName){return{code,game,createdAt:now(),updatedAt:now(),creator:creatorPid,seats:{first:creatorPid,second:null},names:{[creatorPid]:creatorName},moves:[],status:'waiting',result:null,drawOffer:null,rematch:{},round:1,chat:[],setup:{first:'마상상마',second:'마상상마'},timer:0,turnStartedAt:now()};}
 /* ICE: STUN 기본. 중계(TURN) 서버가 생기면 TURN_SERVERS에 {urls,username,credential}를 추가 */
 const TURN_SERVERS=[];
 const ICE_CONFIG={iceServers:[{urls:['stun:stun.l.google.com:19302','stun:stun1.l.google.com:19302','stun:stun.cloudflare.com:3478']}].concat(TURN_SERVERS)};
@@ -391,7 +402,18 @@ const hasPeer=()=>typeof window.Peer==='function';
 
 function persistHost(){if(role==='host'&&S)LS.set('maetsu.host',JSON.stringify(S));}
 function applyPatch(patch){const prevLen=S.moves.length,prevSt=S.status,prevRound=S.round;Object.assign(S,patch);S.updatedAt=now();
-  if(prevLen!==S.moves.length||prevSt!==S.status||prevRound!==S.round){ui.sel=null;ui.legal=[];ui.promo=null;}}
+  if(prevLen!==S.moves.length||prevSt!==S.status||prevRound!==S.round){ui.sel=null;ui.legal=[];ui.promo=null;S.turnStartedAt=now();}}
+/* ---- timer ---- */
+function remainingMs(){if(!S||!S.timer||S.status!=='playing')return null;const base=(S.turnStartedAt||S.updatedAt)+(role==='client'?clockOffset:0);return base+S.timer*1000-now();}
+function fmtClock(ms){const s=Math.max(0,Math.ceil(ms/1000));return Math.floor(s/60)+':'+String(s%60).padStart(2,'0');}
+function checkTimeout(){if(!S||S.status!=='playing'||!S.timer)return;if(!(role==='host'||mode==='local'))return;const rem=remainingMs();if(rem==null||rem>-500)return;
+  const seat=turnSeat(),other=seat==='first'?'second':'first';const a=analyze();let patch;
+  if((S.game==='chess'||S.game==='janggi')&&a.inCheck){patch={status:'finished',result:{type:'win',winner:other,reason:'timeout'},drawOffer:null};}
+  else{const moves=S.moves.concat([S.game==='omok'?null:{pass:true}]);patch={moves,drawOffer:null};const r=S.game==='omok'?omokAnalyze(moves):S.game==='janggi'?janggiReplay(moves,S.setup):chessReplay(moves);if(r.end){patch.status='finished';patch.result=r.end;}}
+  toast(seatLabel(seat,S.game)+' 시간 초과 → '+(patch.status==='finished'?'대국 종료':'상대 차례로 넘어갑니다'));
+  if(mode==='local'){applyPatch(patch);render();}else{applyPatch(patch);persistHost();broadcastState();render();}}
+function tickClock(){const el_=document.getElementById('clock');if(el_){const rem=remainingMs();if(rem==null)el_.textContent='';else{el_.textContent='⏱ '+fmtClock(rem);el_.classList.toggle('low',rem<10000);}}checkTimeout();}
+setInterval(tickClock,250);
 function write(patch){
   if(mode==='local'){applyPatch(patch);render();return;}
   if(role==='host'){applyPatch(patch);persistHost();broadcastState();render();return;}
@@ -433,7 +455,7 @@ function openClientPeer(code,attempt){connecting={code,attempt:attempt||1};rende
       if(connected){clearInterval(iceT);return;}
       if(st==='failed'||(now()-t0>20000&&!connected)){clearInterval(iceT);connecting=Object.assign({},connecting,{blocked:true,ice:st});render();}},1000);
     c.on('open',()=>{connected=true;connecting=null;LS.set('maetsu.client',code);LS.set('maetsu.clientAt',String(now()));c.send({t:'hello',pid,name:myName||'플레이어 2'});render();setTimeout(()=>probeConn(c),1500);});
-    c.on('data',msg=>{if(!msg||msg.t!=='state'||!msg.S)return;const prev=S;S=msg.S;onlinePids=new Set(Array.isArray(msg.online)?msg.online:[]);onlinePids.add(pid);if(!prev)markChatSeen();
+    c.on('data',msg=>{if(!msg||msg.t!=='state'||!msg.S)return;const prev=S;S=msg.S;clockOffset=now()-S.updatedAt;onlinePids=new Set(Array.isArray(msg.online)?msg.online:[]);onlinePids.add(pid);if(!prev)markChatSeen();
       if(!prev||prev.moves.length!==S.moves.length||prev.status!==S.status||prev.round!==S.round){ui.sel=null;ui.legal=[];ui.promo=null;}notifyChat();render();});
     const lost=()=>{if(role!=='client')return;connected=false;onlinePids=new Set([pid]);render();scheduleReconnect(code);};
     c.on('close',lost);c.on('error',lost);});
@@ -444,11 +466,11 @@ function openClientPeer(code,attempt){connecting={code,attempt:attempt||1};rende
 function scheduleReconnect(code){clearTimeout(reconnectT);reconnectT=setTimeout(()=>{if(role==='client'&&!connected)openClientPeer(code,(connecting?connecting.attempt:1)+1);},3000);}
 
 /* ---- lobby actions ---- */
-function createRoom(game){if(!hasPeer()){toast('연결 라이브러리를 불러오지 못했습니다. 인터넷 연결 후 새로고침해 주세요.');return;}saveName();
-  const code=genCode();S=newRoomDoc(code,game,pid,myName||'플레이어 1');role='host';mode='online';hostRetry=0;markChatSeen();persistHost();LS.del('maetsu.client');openHostPeer(code);render();}
+function createRoom(game,timer){if(!hasPeer()){toast('연결 라이브러리를 불러오지 못했습니다. 인터넷 연결 후 새로고침해 주세요.');return;}saveName();
+  const code=genCode();S=newRoomDoc(code,game,pid,myName||'플레이어 1');S.timer=timer||0;role='host';mode='online';hostRetry=0;markChatSeen();persistHost();LS.del('maetsu.client');openHostPeer(code);render();}
 function joinRoom(codeRaw){if(!hasPeer()){toast('연결 라이브러리를 불러오지 못했습니다. 인터넷 연결 후 새로고침해 주세요.');return;}const code=(codeRaw||'').trim().toUpperCase();if(code.length<4){toast('방 코드를 입력해 주세요.');return;}saveName();
   role='client';mode='online';S=null;connected=false;LS.del('maetsu.host');openClientPeer(code,1);}
-function startLocal(game){saveName();mode='local';role='local';S=newRoomDoc('LOCAL',game,pid,myName||'플레이어 1');S.seats.second='local2';S.names.local2='플레이어 2';S.status='playing';ui.sel=null;ui.legal=[];render();}
+function startLocal(game,timer){saveName();mode='local';role='local';S=newRoomDoc('LOCAL',game,pid,myName||'플레이어 1');S.timer=timer||0;S.seats.second='local2';S.names.local2='플레이어 2';S.status='playing';ui.sel=null;ui.legal=[];render();}
 function leaveRoom(){clearTimeout(reconnectT);if(peer){try{peer.destroy();}catch(e){}peer=null;}hostConn=null;connected=false;conns.clear();connecting=null;S=null;mode=null;role=null;onlinePids=new Set();LS.del('maetsu.host');LS.del('maetsu.client');render();}
 function saveName(){const inp=$('#nameIn');if(inp){myName=inp.value.trim().slice(0,16);LS.set('maetsu.name',myName);}}
 
@@ -478,6 +500,7 @@ function renderConnecting(){return el('div',{class:'lobby'},el('div',{class:'car
 function renderHeader(){const h=$('#hdrRight');h.replaceChildren();if(!S)return;
   if(mode==='online'){const chip=el('button',{class:'code-chip',type:'button',title:'코드 복사',onclick:copyCode},el('span',{class:'lbl',text:'방 코드'}),el('span',{class:'code',text:S.code}));h.append(chip);const pill=el('span',{class:'pill'+((role==='host'?onlinePids.size>1:connected)?' on':'')},el('span',{class:'dot'}),role==='host'?(onlinePids.size>1?'상대 접속 중':'상대 대기 중'):(connected?'연결됨':'재연결 중…'),connKind&&(role==='host'?onlinePids.size>1:connected)?' · '+(connKind==='relay'?'중계':'직접'):'');h.append(pill);}
   else h.append(el('span',{class:'pill',text:'같은 컴퓨터 대국'}));
+  if(S.timer)h.append(el('span',{class:'pill',text:'⏱ 한 수 '+S.timer+'초'}));
   h.append(el('button',{class:'btn sm',type:'button',onclick:()=>{if(S.status==='playing'&&mode==='online'&&mySeat()){if(!confirm('대국 중입니다. 나가면 상대가 기다리게 됩니다. 나갈까요? (방 코드로 다시 들어올 수 있습니다)'))return;}leaveRoom();}},'나가기'));}
 function copyCode(){const t=S.code;const done=()=>toast('코드 '+t+' 복사됨. 상대에게 알려 주세요.');if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(t).then(done,()=>toast('코드: '+t));else toast('코드: '+t);}
 
@@ -489,8 +512,10 @@ function renderLobby(){const wrap=el('div',{class:'lobby'});
   const pick=el('div',{class:'game-pick'});const mkOpt=(g,title,desc)=>el('button',{type:'button',class:'game-opt','aria-pressed':String(lobbyGame===g),onclick:()=>{lobbyGame=g;LS.set('maetsu.game',g);render();}},
     el('span',{class:'ic '+g},g==='chess'?'♞':g==='janggi'?'楚':''),el('span',null,el('b',{text:title}),el('small',{text:desc})));
   pick.append(mkOpt('omok','오목','15줄 · 렌주룰 (흑 3·3, 4·4, 장목 금수)'),mkOpt('chess','체스','캐슬링 · 앙파상 · 프로모션 · 3회 동형 · 50수'),mkOpt('janggi','장기','9×10 · 상마 배치 선택 · 빅장 · 한 수 쉬기'));
-  const create=el('div',{class:'card'},el('h2',{text:'방 만들기'}),el('p',{class:'desc',text:'코드가 생성됩니다. 상대에게 코드를 알려 주면 입장합니다. 방을 만든 사람이 선수(오목 흑 · 체스 백)이며, 대국 중에는 두 사람이 모두 이 페이지를 열어 두어야 합니다.'}),pick,
-    el('div',{class:'row'},el('button',{class:'btn primary',type:'button',disabled:hasPeer()?null:'',onclick:()=>createRoom(lobbyGame)},'방 만들기'),el('button',{class:'btn',type:'button',onclick:()=>startLocal(lobbyGame)},'같은 컴퓨터에서 두기')));
+  const modePick=el('div',{class:'mode-pick'});const mkMode=(t,title,desc)=>el('button',{type:'button','aria-pressed':String(lobbyTimer===t),onclick:()=>{lobbyTimer=t;LS.set('maetsu.timer',String(t));render();}},el('b',{text:title}),el('small',{text:desc}));
+  modePick.append(mkMode(0,'일반 대국','시간 제한 없음'),mkMode(60,'빠른 대국','한 수 60초 · 넘기면 상대 차례 (체스·장기는 장군 상태면 패)'));
+  const create=el('div',{class:'card'},el('h2',{text:'방 만들기'}),el('p',{class:'desc',text:'코드가 생성됩니다. 상대에게 코드를 알려 주면 입장합니다. 방을 만든 사람이 선수(오목 흑 · 체스 백)이며, 대국 중에는 두 사람이 모두 이 페이지를 열어 두어야 합니다.'}),pick,modePick,
+    el('div',{class:'row'},el('button',{class:'btn primary',type:'button',disabled:hasPeer()?null:'',onclick:()=>createRoom(lobbyGame,lobbyTimer)},'방 만들기'),el('button',{class:'btn',type:'button',onclick:()=>startLocal(lobbyGame,lobbyTimer)},'같은 컴퓨터에서 두기')));
   const codeIn=el('input',{type:'text',class:'code-in',id:'codeIn',maxlength:'5',placeholder:'ABCDE',autocomplete:'off',spellcheck:'false',onkeydown:e=>{if(e.key==='Enter')joinRoom(codeIn.value);}});
   const join=el('div',{class:'card'},el('h2',{text:'방 입장'}),el('p',{class:'desc',text:'상대가 알려준 5자리 코드를 입력하세요. 두 자리가 다 찼으면 관전으로 들어갑니다.'}),
     el('label',{class:'f',for:'codeIn',text:'방 코드'}),codeIn,el('div',{style:'height:12px'}),el('button',{class:'btn primary',type:'button',disabled:hasPeer()?null:'',style:'width:100%',onclick:()=>joinRoom(codeIn.value)},'입장'));
@@ -554,11 +579,11 @@ function renderSide(a){const side=el('div',{class:'side'});
   if(S.status==='waiting'){text='상대를 기다리는 중';sub=mode==='online'?'방 코드 '+S.code+'를 상대에게 알려 주세요.':'';}
   else if(S.status==='finished'&&S.result){end=true;const r=S.result;
     if(r.type==='draw'){text='무승부';sub={stalemate:'스테일메이트',repetition:'3회 동형 반복',fifty:'50수 규칙',material:'기물 부족',agreed:'합의',full:'판이 가득 찼습니다',bikjang:'빅장',passes:'양쪽 연속 한 수 쉼'}[r.reason]||'';}
-    else{const wn=nameOf(S.seats[r.winner]);text=seatLabel(r.winner,S.game)+' 승 · '+wn;sub={five:'오목 완성',checkmate:S.game==='janggi'?'외통(장군 회피 불가)':'체크메이트',resign:'상대 기권'}[r.reason]||'';}}
+    else{const wn=nameOf(S.seats[r.winner]);text=seatLabel(r.winner,S.game)+' 승 · '+wn;sub={five:'오목 완성',checkmate:S.game==='janggi'?'외통(장군 회피 불가)':'체크메이트',resign:'상대 기권',timeout:'시간 초과(장군 상태)'}[r.reason]||'';}}
   else{const who=nameOf(S.seats[ts]);text=seatLabel(ts,S.game)+' 차례 · '+who;
     if(mode==='online'&&seat){sub=seat===ts?'내 차례입니다.':'상대가 두는 중입니다.';}
     if(S.game==='chess'&&a.inCheck)sub='체크! '+sub;if(S.game==='janggi'&&a.inCheck)sub='장군! '+sub;else if(S.game==='janggi'&&a.bikjang)sub='빅장! 풀지 않고 두면 무승부. '+sub;}
-  side.append(el('div',{class:'status'+(end?' end':'')},text,sub?el('small',{text:sub}):null));
+  side.append(el('div',{class:'status'+(end?' end':'')},text,sub?el('small',{text:sub}):null,(S.timer&&S.status==='playing')?el('span',{class:'clock',id:'clock',text:'⏱ '+fmtClock(remainingMs()||0)}):null));
   if(role==='client'&&!connected)side.append(el('div',{class:'notice err',text:'방장과 연결이 끊겼습니다. 자동으로 다시 연결을 시도합니다.'}));
   // players
   const pl=el('div',{class:'players'});for(const s of['first','second']){const p=S.seats[s];const isTurn=S.status==='playing'&&ts===s;
@@ -605,7 +630,7 @@ function renderOmok(a){const M=36,ST=40,W=M*2+ST*14;const NS='http://www.w3.org/
   const b=a.b;const forb=(S.status==='playing'&&a.turn===1)?forbiddenSet(b):[];
   for(let y=0;y<N;y++)for(let x=0;x<N;x++){const v=b[y*N+x];if(v)sv.append(mk('circle',{class:v===1?'sb':'sw',cx:px(x),cy:px(y),r:18}));}
   for(const idx of forb){const x=idx%N,y=(idx-x)/N,cx=px(x),cy=px(y);sv.append(mk('line',{class:'forb',x1:cx-6,y1:cy-6,x2:cx+6,y2:cy+6}),mk('line',{class:'forb',x1:cx-6,y1:cy+6,x2:cx+6,y2:cy-6}));}
-  if(S.moves.length){const m=S.moves[S.moves.length-1];const onb=(S.moves.length-1)%2===0;sv.append(mk('rect',{class:'lastm'+(onb?' onb':''),x:px(m[0])-5,y:px(m[1])-5,width:10,height:10}));}
+  let li=S.moves.length-1;while(li>=0&&!S.moves[li])li--;if(li>=0){const m=S.moves[li];const onb=li%2===0;sv.append(mk('rect',{class:'lastm'+(onb?' onb':''),x:px(m[0])-5,y:px(m[1])-5,width:10,height:10}));}
   const hit=mk('rect',{class:'hit',x:0,y:0,width:W,height:W,fill:'transparent'});sv.append(hit);
   sv.addEventListener('click',e=>{if(!canAct())return;const r=sv.getBoundingClientRect();const sx=(e.clientX-r.left)*W/r.width,sy=(e.clientY-r.top)*W/r.height;const x=Math.round((sx-M)/ST),y=Math.round((sy-M)/ST);if(!inB(x,y))return;if(Math.abs(sx-px(x))>17||Math.abs(sy-px(y))>17)return;placeOmok(x,y);});
   return sv;}
@@ -635,10 +660,11 @@ function renderPromo(){const w=el('div',{class:'promo'},el('span',{style:'font-s
 /* ============================================================
    BOOT
    ============================================================ */
+window.__maetsuDebug={get S(){return S;},rewind(ms){if(S)S.turnStartedAt=now()-ms;}};
 window.__maetsuEngine={chessInit,legalMoves,makeMove,chessReplay,omokBoard,isForbidden,forbiddenSet,omokAnalyze,janggiInit,jLegal,jMake,janggiReplay,jMoves,jAttacked};
 render();
 (function restore(){const h=LS.get('maetsu.host');
-  if(h){try{const d=JSON.parse(h);if(d&&d.code&&now()-(d.updatedAt||0)<24*3600*1000&&hasPeer()){S=d;role='host';mode='online';markChatSeen();openHostPeer(d.code);render();return;}}catch(e){}LS.del('maetsu.host');}
+  if(h){try{const d=JSON.parse(h);if(d&&d.code&&now()-(d.updatedAt||0)<24*3600*1000&&hasPeer()){S=d;S.turnStartedAt=now();role='host';mode='online';markChatSeen();openHostPeer(d.code);render();return;}}catch(e){}LS.del('maetsu.host');}
   const c=LS.get('maetsu.client'),cAt=Number(LS.get('maetsu.clientAt','0'));
   if(c&&now()-cAt<12*3600*1000&&hasPeer()){myName=LS.get('maetsu.name','');role='client';mode='online';openClientPeer(c,1);}})();
 window.addEventListener('beforeunload',()=>{if(peer){try{peer.destroy();}catch(e){}}});
